@@ -1,0 +1,236 @@
+"""
+API v1 — 交易策略模块数据接口
+
+设计目标：
+- 为策略引擎提供干净、可聚合的 K线数据
+- 支持 source=live 直接从 AKShare 拉取（不命中缓存）
+- 支持多周期聚合（服务端完成）
+"""
+
+from __future__ import annotations
+import time
+from datetime import datetime, timedelta
+from typing import Literal, Optional
+
+from fastapi import APIRouter, Depends, Query, Request
+from loguru import logger
+
+from server.aggregation import aggregate_bars, Period
+from server.data_service import full_symbol
+from futures_demo.fetcher import fetch_minute_bars, get_exchange, parse_symbol
+
+router = APIRouter(prefix="/api/v1")
+
+
+# ── 依赖注入 ───────────────────────────────────────────────────
+
+def _get_ds(request: Request):
+    """从 app.state 获取 DataService 实例"""
+    return request.app.state.ds
+
+
+# ── GET /api/v1/bars/{symbol} ──────────────────────────────────
+
+@router.get("/bars/{symbol}")
+async def get_bars(
+    symbol: str,
+    period: Period = "1m",
+    start: Optional[str] = None,       # ISO8601: "2026-06-01" or "2026-06-01T09:00:00"
+    end: Optional[str] = None,         # ISO8601
+    limit: int = Query(500, ge=1, le=10000),
+    source: Literal["auto", "db", "live"] = "auto",
+    ds=Depends(_get_ds),
+):
+    """
+    获取K线数据（支持多周期聚合 + 多数据源）
+
+    - period: 1m, 5m, 15m, 1h, 1d
+    - start/end: ISO8601 格式
+    - source: auto=缓存优先, db=只查DB, live=直接从AKShare拉
+    """
+    # 解析时间范围
+    now = datetime.now()
+    start_dt = _parse_dt(start, now - timedelta(days=7))
+    end_dt = _parse_dt(end, now)
+
+    # 如果 start > end，交换
+    if start_dt > end_dt:
+        start_dt, end_dt = end_dt, start_dt
+
+    start_ns = int(start_dt.timestamp() * 1e9)
+    end_ns = int(end_dt.timestamp() * 1e9)
+
+    # 策略决定从哪获取数据
+    raw_bars: list[dict] = []
+
+    if source == "live":
+        # 从 AKShare 拉取 → 自动写入 DB 缓存
+        logger.info(f"[v1] source=live: fetching {symbol}")
+        raw_bars = _fetch_and_store_live_bars(symbol, start_ns, end_ns, ds.storage)
+    elif source == "db":
+        # 只查 DB（扩大 days_back 确保覆盖 start）
+        days_back = max(90, int((datetime.now() - start_dt).days) + 2)
+        raw_bars = ds.get_kline(symbol, limit=10000, days_back=days_back)
+        raw_bars = _filter_by_ns(raw_bars, start_ns, end_ns)
+    else:  # auto
+        # DB 优先，不够再从 AKShare 补
+        days_back = max(90, int((datetime.now() - start_dt).days) + 2)
+        raw_bars = ds.get_kline(symbol, limit=10000, days_back=days_back)
+        raw_bars = _filter_by_ns(raw_bars, start_ns, end_ns)
+        bars_count = len(raw_bars)
+        # 如果DB数据为空或明显缺失，尝试 AKShare 直拉（含自动写库）
+        if bars_count == 0:
+            logger.info(f"[v1] source=auto: DB empty for {symbol}, falling back to live")
+            raw_bars = _fetch_and_store_live_bars(symbol, start_ns, end_ns, ds.storage)
+        else:
+            logger.info(f"[v1] source=auto: returning {bars_count} bars from DB")
+
+    # 聚合
+    result = aggregate_bars(raw_bars, period)
+
+    # 截断
+    if len(result) > limit:
+        result = result[-limit:]
+
+    return {
+        "symbol": full_symbol(symbol),
+        "period": period,
+        "start": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "end": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "count": len(result),
+        "source": source,
+        "bars": _clean_bars(result),
+    }
+
+
+# ── GET /api/v1/quotes ────────────────────────────────────────
+
+@router.get("/quotes/{symbol}")
+async def get_quote(symbol: str, ds=Depends(_get_ds)):
+    """获取品种最新报价"""
+    quote = ds.get_latest_quote(symbol)
+    return {"symbol": symbol, "quote": quote}
+
+
+@router.get("/quotes")
+async def get_quotes(
+    symbols: str = Query("", description="逗号分隔的品种列表，空=全部"),
+    ds=Depends(_get_ds),
+):
+    """获取批量最新报价"""
+    if symbols:
+        sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    else:
+        sym_list = ds.get_symbol_codes()
+    results = {}
+    for sym in sym_list:
+        try:
+            q = ds.get_latest_quote(sym)
+            if q:
+                results[sym] = q
+        except Exception:
+            continue
+    return {"count": len(results), "quotes": results}
+
+
+# ── GET /api/v1/symbols ───────────────────────────────────────
+
+@router.get("/symbols")
+async def list_symbols(ds=Depends(_get_ds)):
+    """获取所有品种列表"""
+    return {"symbols": ds.get_symbols()}
+
+
+@router.get("/symbols/{code}")
+async def symbol_meta(code: str):
+    """获取品种元信息（含合约乘数、最小变动等）"""
+    from futures_demo.models import get_multiplier
+    try:
+        variety, contract = parse_symbol(code)
+    except ValueError:
+        return {"error": f"Invalid symbol: {code}"}
+    exchange = get_exchange(variety)
+    multiplier = get_multiplier(f"{code}.{exchange.value}")
+    return {
+        "code": code,
+        "variety": variety,
+        "exchange": exchange.value,
+        "full_symbol": f"{code}.{exchange.value}",
+        "contract_month": contract,
+        "multiplier": multiplier,
+    }
+
+
+# ── 辅助函数 ──────────────────────────────────────────────────
+
+def _parse_dt(s: Optional[str], default: datetime) -> datetime:
+    if not s:
+        return default
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return default
+
+
+def _filter_by_ns(bars: list[dict], start_ns: int, end_ns: int) -> list[dict]:
+    """按纳秒时间戳范围过滤"""
+    return [b for b in bars if start_ns <= b["ts_ns"] <= end_ns]
+
+
+def _fetch_and_store_live_bars(
+    symbol: str, start_ns: int, end_ns: int, storage,
+) -> list[dict]:
+    """
+    从 AKShare 直拉数据 → 全量写入 DB → 返回时间范围内结果。
+    下次同品种查 source=db/auto 直接命中缓存。
+    """
+    code = symbol.split(".")[0] if "." in symbol else symbol
+    try:
+        bars = fetch_minute_bars(code, lookback_days=5, force=True)
+    except Exception as e:
+        logger.error(f"[v1] live fetch failed: {e}")
+        return []
+    if not bars:
+        return []
+
+    # 全量写入 DB（upsert 自动去重）
+    n = storage.upsert_bars(bars)
+    logger.info(f"[v1] live: stored {n} bars for {code}")
+
+    # 返回时间范围内的子集
+    result = [
+        {
+            "ts_ns": b.ts_ns,
+            "ts": b.ts_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            "open": float(b.open),
+            "high": float(b.high),
+            "low": float(b.low),
+            "close": float(b.close),
+            "volume": b.volume,
+            "turnover": float(b.turnover),
+            "open_interest": b.open_interest,
+        }
+        for b in bars
+        if start_ns <= b.ts_ns <= end_ns
+    ]
+    logger.info(f"[v1] live: {len(bars)} total, {len(result)} in range")
+    return result
+
+
+def _clean_bars(bars: list[dict]) -> list[dict]:
+    """移除内部字段，只保留策略需要的字段"""
+    clean = []
+    for b in bars:
+        clean.append({
+            "ts": b["ts"],
+            "ts_ns": b["ts_ns"],
+            "open": b["open"],
+            "high": b["high"],
+            "low": b["low"],
+            "close": b["close"],
+            "volume": b["volume"],
+            "open_interest": b.get("open_interest"),
+        })
+    return clean

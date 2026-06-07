@@ -20,6 +20,7 @@ from server.config import AppConfig, load_config
 from server.connection_manager import ConnectionManager
 from server.data_service import DataService
 from server.scheduler import DataScheduler
+from server.routers.v1 import router as v1_router
 
 
 # ── 工厂方法 ──────────────────────────────────────────────────
@@ -141,6 +142,9 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     async def api_quality():
         """数据质量报告"""
         return {"reports": ds.get_quality_report()}
+
+    # ============ API v1（外部模块数据接口）============
+    app.include_router(v1_router)
 
     # ============ 前端静态文件 ============
     frontend_path = cfg.server.frontend_path
