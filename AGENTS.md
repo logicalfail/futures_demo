@@ -132,6 +132,7 @@ See `docs/KNOWLEDGE.md` for the full matrix.
 |--------|---------|
 | Start server (foreground) | `.\start.bat` or `.\start.bat 9000 0.0.0.0` (port, host) |
 | Start server (background, bat exits) | `.\start.bat --bg` (logs: `server.log`) |
+| Start server (background, auto-open browser) | `.\start_bg.bat` (kills old instance, opens http://...) |
 | Start server (background PowerShell) | `.\start.ps1 -Mode devbg` |
 | Start server (dev, hot-reload) | `.\start.ps1 -Mode dev` |
 | Frontend dev server | `cd frontend && npm run dev` (port 5173) |
