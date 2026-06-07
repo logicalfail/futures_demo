@@ -4,11 +4,12 @@
 - 每分钟触发数据轮询
 - 轮询完成后自动通过 ConnectionManager 广播新数据
 - 支持手动触发单次刷新
+- 每日 23:59 自动拉取所有品种主力合约数据
 """
 
 from __future__ import annotations
 import asyncio
-import time
+from datetime import datetime
 from typing import Optional
 
 from loguru import logger
@@ -23,6 +24,7 @@ class DataScheduler:
     - start() 启动后台循环
     - stop() 优雅停止
     - trigger_poll() 手动触发一轮轮询
+    - 每日 23:59 自动拉取所有品种主力合约分钟数据
     """
 
     def __init__(
@@ -38,6 +40,7 @@ class DataScheduler:
         self._trading_only = trading_hours_only
         self._task: Optional[asyncio.Task] = None
         self._running = False
+        self._daily_done = False
 
     async def start(self):
         """启动后台调度循环"""
@@ -88,6 +91,17 @@ class DataScheduler:
     async def _tick(self):
         """一次调度 tick：轮询 → 推送到已订阅客户端"""
         logger.debug("Scheduler tick...")
+
+        # ── 每日 23:59 主力合约数据拉取 ──
+        now = datetime.now()
+        if now.hour == 23 and now.minute == 59 and not self._daily_done:
+            logger.info("[daily] 23:59 - starting dominant contract data pull...")
+            await self._run_daily_pull()
+            self._daily_done = True
+        if now.hour != 23:
+            self._daily_done = False
+
+        # ── 常规分钟级轮询 ──
         await self._ws.broadcast_status("polling", "Fetching new data...")
 
         # 1. 轮询新数据（在 executor 中运行，不阻塞事件循环）
@@ -106,6 +120,51 @@ class DataScheduler:
             total_broadcast += n
 
         await self._ws.broadcast_status("idle", f"Updated {len(new_data)} symbols")
+
+    async def _run_daily_pull(self):
+        """
+        每日 23:59 执行：遍历所有品种，拉取当前主力合约分钟数据。
+        在 executor 中运行以避免阻塞事件循环。
+        """
+        # 动态导入避免循环依赖
+        from futures_demo.config import get_config as get_data_config
+        from futures_demo.fetcher import parse_symbol, fetch_minute_bars
+        from server.dominant import resolve_dominant_symbol
+
+        cfg = get_data_config()
+        symbols_cfg = cfg.symbols.symbols
+        logger.info(f"[daily] Pulling dominant contract data for {len(symbols_cfg)} varieties...")
+
+        total = 0
+        loop = asyncio.get_running_loop()
+
+        for sym in symbols_cfg:
+            variety, _ = parse_symbol(sym)
+
+            # 在 executor 中解析主力合约（AKShare 同步调用）
+            dom_symbol = await loop.run_in_executor(None, resolve_dominant_symbol, variety)
+            if not dom_symbol:
+                logger.warning(f"[daily] Cannot resolve dominant for {variety}, skip")
+                continue
+
+            code = dom_symbol.split(".")[0]
+            logger.info(f"[daily] {variety} -> dominant: {code}")
+
+            # 在 executor 中拉取分钟数据
+            bars = await loop.run_in_executor(
+                None, lambda: fetch_minute_bars(code, lookback_days=20, force=True)
+            )
+
+            if bars:
+                n = self._data.storage.upsert_bars(bars)
+                total += n
+                logger.info(f"[daily] {code}: {len(bars)} bars, {n} upserted")
+
+            # 礼貌延迟，避免频控
+            await asyncio.sleep(0.3)
+
+        logger.info(f"[daily] Done. Total {total} bars upserted across {len(symbols_cfg)} varieties")
+        await self._ws.broadcast_status("idle", f"Daily pull: {total} bars")
 
     async def trigger_poll(self) -> dict[str, int]:
         """

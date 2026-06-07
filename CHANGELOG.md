@@ -60,9 +60,17 @@
 - **实时缓存**：从 AKShare 拉取的数据自动写入 SQLite，后续查询直接命中缓存。
 - 新增 `server/dominant.py` 模块（180行），封装主力合约解析、换月拼接、价格调整核心逻辑。
 
+### 数据窗口 & 每日定时采集
+
+- **数据窗口统一为 20 天**：`config.yaml` 的 `lookback_days` 从 5 改为 20，所有 API 默认时间范围也同步更新。
+- **每日 23:59 主力合约采集**：`server/scheduler.py` 新增 `_run_daily_pull()`，每日 23:59 自动遍历所有品种，通过 `match_main_contract` 解析当前主力合约并拉取分钟数据存入 DB。
+- 在 executor 中运行避免阻塞事件循环，品种间 0.3s 延迟防频控。
+
 ### 提交记录
 
 ```
+1f54a01 chore: extend data window from 5/7 days to 20 days
+2a41946 feat: add dominant contract API with rollover chaining
 2787749 feat: expand symbol list to 24 varieties
 a22211d docs: add CHANGELOG.md recording development progress
 304ec51 chore: update data snapshot - refreshed futures 1m bar data

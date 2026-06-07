@@ -142,6 +142,7 @@ See `docs/KNOWLEDGE.md` for the full matrix.
 | Build frontend | `cd frontend && npm run build` |
 | Fetch data once | `python -m futures_demo.pipeline fetch` |
 | Continuous collection | `python -m futures_demo.pipeline loop` |
+| Daily dominant pull | 自动，每日 23:59 服务器调度器触发 |
 | Quality verify | `python -m futures_demo.pipeline verify` |
 | Run all tests | `$env:PYTHONPATH='C:\futures_demo'; python -m pytest tests/ -v` |
 | Run backend tests only | `python tests/test_server_phase1.py` |
