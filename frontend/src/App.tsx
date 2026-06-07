@@ -2,7 +2,7 @@
  * 期货行情终端 - 主应用
  * - K线图（中央）
  * - 报价表格（右侧）
- * - 品种选择器（上方/工具栏）
+ * - 品种选择器 + 时间范围选择器（上方）
  * - 状态栏（底部）
  */
 
@@ -12,8 +12,36 @@ import QuoteTable from './components/QuoteTable'
 import SymbolSelector from './components/SymbolSelector'
 import StatusBar from './components/StatusBar'
 import { useWebSocket } from './hooks/useWebSocket'
-import { getSymbols, getKLine, getStatus, getQuote } from './api/dataService'
-import type { SymbolInfo, KLineData } from './types'
+import { getSymbols, getKLine, getStatus, getQuote, getBarsV1 } from './api/dataService'
+import type { SymbolInfo, KLineData, TimeRangePreset, Period } from './types'
+
+// ── 时间范围预设 ──
+interface TimeRangeOption {
+  preset: TimeRangePreset
+  label: string
+  days: number
+  period: Period
+}
+
+const RANGE_OPTIONS: TimeRangeOption[] = [
+  { preset: '1d',  label: '1日',  days: 1,  period: '1m' },
+  { preset: '3d',  label: '3日',  days: 3,  period: '5m' },
+  { preset: '7d',  label: '1周',  days: 7,  period: '15m' },
+  { preset: '30d', label: '1月',  days: 30, period: '1h' },
+]
+
+function isoNow(): string {
+  const d = new Date()
+  d.setSeconds(0, 0)
+  return d.toISOString().slice(0, 16).replace('T', 'T')
+}
+
+function isoPast(days: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  d.setSeconds(0, 0)
+  return d.toISOString().slice(0, 16).replace('T', 'T')
+}
 
 export default function App() {
   // ---- 品种数据 ----
@@ -21,36 +49,70 @@ export default function App() {
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([])
   const [currentSymbol, setCurrentSymbol] = useState<string | null>(null)
   const [kLineData, setKLineData] = useState<KLineData[]>([])
+  const [kLinePeriod, setKLinePeriod] = useState<Period>('1m')
   const [quotes, setQuotes] = useState<Map<string, KLineData>>(new Map())
   const [lastUpdate, setLastUpdate] = useState('')
   const [refreshing, setRefreshing] = useState(false)
 
-  // ---- 初始化 ----
+  // ---- 时间范围状态 ----
+  const [rangePreset, setRangePreset] = useState<TimeRangePreset>('3d')
+  const [customStart, setCustomStart] = useState(isoPast(7))
+  const [customEnd, setCustomEnd] = useState(isoNow())
+  const [loading, setLoading] = useState(false)
+
+  // ---- 初始加载 ----
   useEffect(() => {
     getSymbols().then(syms => {
       setSymbols(syms)
       if (syms.length > 0) {
-        // 默认选中第一个品种
         const first = syms[0].full_symbol
         setSelectedSymbols([first])
         setCurrentSymbol(first)
-        loadKLine(first)
+        loadKLineByRange(first, '3d')
         loadQuote(first)
       }
     })
     loadStatus()
   }, [])
 
-  // ---- 数据加载 ----
-  const loadKLine = async (symbol: string) => {
+  // ---- K线加载（按时间范围） ----
+  const loadKLineByRange = useCallback(async (
+    symbol: string,
+    preset: TimeRangePreset,
+    cStart?: string,
+    cEnd?: string,
+  ) => {
+    setLoading(true)
     try {
-      const bars = await getKLine(symbol, 300, 3)
+      let start: string, end: string, period: Period
+
+      if (preset === 'custom' && cStart && cEnd) {
+        start = cStart
+        end = cEnd
+        // 根据自定义范围天数选择周期
+        const days = (new Date(end).getTime() - new Date(start).getTime()) / 86400000
+        if (days <= 1) period = '1m'
+        else if (days <= 3) period = '5m'
+        else if (days <= 14) period = '15m'
+        else period = '1h'
+      } else {
+        const opt = RANGE_OPTIONS.find(r => r.preset === preset)!
+        end = isoNow()
+        start = isoPast(opt.days)
+        period = opt.period
+      }
+
+      setKLinePeriod(period)
+      const bars = await getBarsV1(symbol, period, start, end)
       setKLineData(bars)
     } catch (e) {
       console.warn('Failed to load KLine:', e)
+    } finally {
+      setLoading(false)
     }
-  }
+  }, [])
 
+  // ---- 其他数据加载 ----
   const loadQuote = async (symbol: string) => {
     try {
       const quote = await getQuote(symbol)
@@ -87,34 +149,45 @@ export default function App() {
   // ---- 切换品种 ----
   const handleSelectSymbol = useCallback((symbol: string) => {
     setCurrentSymbol(symbol)
-    loadKLine(symbol)
-  }, [])
+    loadKLineByRange(symbol, rangePreset, customStart, customEnd)
+  }, [rangePreset, customStart, customEnd, loadKLineByRange])
 
   // ---- 品种选择变更 ----
   const handleSymbolsChange = useCallback((selected: string[]) => {
     setSelectedSymbols(selected)
-    // 如果当前品种被取消，切换到第一个
     if (currentSymbol && !selected.includes(currentSymbol) && selected.length > 0) {
       setCurrentSymbol(selected[0])
-      loadKLine(selected[0])
+      loadKLineByRange(selected[0], rangePreset, customStart, customEnd)
     }
     if (selected.length === 0) {
       setCurrentSymbol(null)
       setKLineData([])
     }
-  }, [currentSymbol])
+  }, [currentSymbol, rangePreset, customStart, customEnd, loadKLineByRange])
+
+  // ---- 时间范围切换 ----
+  const handleRangeChange = useCallback((preset: TimeRangePreset) => {
+    setRangePreset(preset)
+    if (currentSymbol) {
+      loadKLineByRange(currentSymbol, preset, customStart, customEnd)
+    }
+  }, [currentSymbol, customStart, customEnd, loadKLineByRange])
+
+  const handleCustomRange = useCallback(() => {
+    if (currentSymbol) {
+      loadKLineByRange(currentSymbol, 'custom', customStart, customEnd)
+    }
+  }, [currentSymbol, customStart, customEnd, loadKLineByRange])
 
   // ---- WebSocket 回调 ----
   const handleKLineUpdate = useCallback((symbol: string, bars: KLineData[]) => {
     if (symbol === currentSymbol) {
       setKLineData(prev => {
-        // 合并更新：用新bars替换旧数据
         const existing = new Map(prev.map(b => [b.ts_ns, b]))
         for (const bar of bars) existing.set(bar.ts_ns, bar)
         return Array.from(existing.values()).sort((a, b) => a.ts_ns - b.ts_ns)
       })
     }
-    // 更新报价表
     if (bars.length > 0) {
       const latest = bars[bars.length - 1]
       setQuotes(prev => {
@@ -131,7 +204,6 @@ export default function App() {
     }
   }, [])
 
-  // ---- WebSocket 连接 ----
   const { connectionStatus, subscribe, unsubscribe, manualRefresh } = useWebSocket({
     onKLineUpdate: handleKLineUpdate,
     onStatus: handleStatusMsg,
@@ -141,31 +213,29 @@ export default function App() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
     manualRefresh()
-    // 也通过 HTTP 刷新一次
     try {
       const resp = await fetch('/api/refresh', { method: 'POST' })
       await resp.text()
       await loadAllQuotes()
-      if (currentSymbol) await loadKLine(currentSymbol)
+      if (currentSymbol) {
+        await loadKLineByRange(currentSymbol, rangePreset, customStart, customEnd)
+      }
       await loadStatus()
     } catch { /* ignore */ }
     setTimeout(() => setRefreshing(false), 800)
-  }, [manualRefresh, currentSymbol])
+  }, [manualRefresh, currentSymbol, rangePreset, customStart, customEnd, loadKLineByRange])
 
-  // ---- 品种选择变化时重新订阅 ----
+  // ---- 订阅 ----
   useEffect(() => {
-    // WS 连接建立后自动订阅
     if (connectionStatus === 'connected' && selectedSymbols.length > 0) {
       subscribe(selectedSymbols)
     }
   }, [connectionStatus, selectedSymbols, subscribe])
 
-  // ---- 定期拉取报价（兜底，防止WS丢数据） ----
+  // ---- 定期拉取报价 ----
   useEffect(() => {
     if (selectedSymbols.length === 0) return
-    const timer = setInterval(() => {
-      loadAllQuotes()
-    }, 15000) // 每15秒拉一次
+    const timer = setInterval(() => loadAllQuotes(), 15000)
     return () => clearInterval(timer)
   }, [selectedSymbols])
 
@@ -178,7 +248,7 @@ export default function App() {
       color: '#ddd',
       fontFamily: '"Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif',
     }}>
-      {/* ---- 顶栏 ---- */}
+      {/* ──── 顶栏 ──── */}
       <header style={{
         display: 'flex',
         alignItems: 'center',
@@ -186,28 +256,110 @@ export default function App() {
         padding: '8px 16px',
         background: '#12122a',
         borderBottom: '1px solid #2a2a4e',
+        flexWrap: 'wrap' as const,
       }}>
-        <h1 style={{ fontSize: 16, fontWeight: 600, margin: 0, color: '#eee' }}>
+        <h1 style={{ fontSize: 16, fontWeight: 600, margin: 0, color: '#eee', whiteSpace: 'nowrap' }}>
           期货行情终端
         </h1>
-        <div style={{ flex: 1 }} />
         <SymbolSelector
           symbols={symbols}
           selected={selectedSymbols}
           onChange={handleSymbolsChange}
         />
+
+        {/* 时间范围选择器 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
+          {RANGE_OPTIONS.map(opt => (
+            <button
+              key={opt.preset}
+              onClick={() => handleRangeChange(opt.preset)}
+              style={{
+                padding: '3px 10px',
+                fontSize: 12,
+                border: '1px solid',
+                borderColor: rangePreset === opt.preset ? '#6a6aae' : '#2a2a4e',
+                borderRadius: 3,
+                background: rangePreset === opt.preset ? '#2a2a5e' : 'transparent',
+                color: rangePreset === opt.preset ? '#ddd' : '#777',
+                cursor: 'pointer',
+              }}
+            >{opt.label}</button>
+          ))}
+
+          <span style={{ color: '#444', margin: '0 2px' }}>|</span>
+
+          {/* 自定义按钮 + 输入 */}
+          {rangePreset === 'custom' ? (
+            <>
+              <input
+                type="datetime-local"
+                value={customStart}
+                onChange={e => setCustomStart(e.target.value)}
+                style={{
+                  padding: '2px 4px',
+                  fontSize: 11,
+                  background: '#1a1a3e',
+                  border: '1px solid #2a2a4e',
+                  borderRadius: 3,
+                  color: '#aaa',
+                  width: 160,
+                }}
+              />
+              <span style={{ color: '#555' }}>~</span>
+              <input
+                type="datetime-local"
+                value={customEnd}
+                onChange={e => setCustomEnd(e.target.value)}
+                style={{
+                  padding: '2px 4px',
+                  fontSize: 11,
+                  background: '#1a1a3e',
+                  border: '1px solid #2a2a4e',
+                  borderRadius: 3,
+                  color: '#aaa',
+                  width: 160,
+                }}
+              />
+              <button
+                onClick={handleCustomRange}
+                style={{
+                  padding: '3px 10px',
+                  fontSize: 12,
+                  border: '1px solid #6a6aae',
+                  borderRadius: 3,
+                  background: '#2a2a5e',
+                  color: '#ddd',
+                  cursor: 'pointer',
+                }}
+              >查询</button>
+            </>
+          ) : (
+            <button
+              onClick={() => { setRangePreset('custom') }}
+              style={{
+                padding: '3px 10px',
+                fontSize: 12,
+                border: '1px solid #2a2a4e',
+                borderRadius: 3,
+                background: 'transparent',
+                color: '#777',
+                cursor: 'pointer',
+              }}
+            >自定义</button>
+          )}
+        </div>
       </header>
 
-      {/* ---- 状态栏 ---- */}
+      {/* ──── 状态栏 + Loading ──── */}
       <StatusBar
         connectionStatus={connectionStatus}
         lastUpdate={lastUpdate}
         symbolCount={selectedSymbols.length}
         onRefresh={handleRefresh}
-        refreshing={refreshing}
+        refreshing={refreshing || loading}
       />
 
-      {/* ---- 主区域 ---- */}
+      {/* ──── 主区域 ──── */}
       <div style={{
         flex: 1,
         display: 'flex',
@@ -223,11 +375,32 @@ export default function App() {
         }}>
           {currentSymbol ? (
             <>
-              <div style={{ fontSize: 13, color: '#888', marginBottom: 4, paddingLeft: 4 }}>
-                {currentSymbol}
+              <div style={{
+                fontSize: 13,
+                color: '#888',
+                marginBottom: 4,
+                paddingLeft: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                <span>{currentSymbol}</span>
+                {kLinePeriod !== '1m' && (
+                  <span style={{
+                    fontSize: 11,
+                    background: '#1a1a3e',
+                    border: '1px solid #2a2a4e',
+                    borderRadius: 3,
+                    padding: '0 6px',
+                    color: '#6a6aae',
+                  }}>
+                    {kLinePeriod}
+                  </span>
+                )}
+                {loading && <span style={{ fontSize: 11, color: '#6a6aae' }}>加载中...</span>}
               </div>
               <div style={{ flex: 1, minHeight: 0 }}>
-                <KLineChart symbol={currentSymbol} bars={kLineData} />
+                <KLineChart symbol={currentSymbol} bars={kLineData} period={kLinePeriod} />
               </div>
             </>
           ) : (

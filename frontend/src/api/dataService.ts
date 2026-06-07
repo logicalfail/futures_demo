@@ -6,7 +6,7 @@
  * - 服务状态
  */
 
-import type { SymbolInfo, KLineData, ServerStatus, QualityReport } from '../types'
+import type { SymbolInfo, KLineData, ServerStatus, QualityReport, Period } from '../types'
 
 const BASE = ''  // 开发时 vite proxy 处理，生产时同域
 
@@ -44,4 +44,25 @@ export async function getQuality(): Promise<QualityReport[]> {
 export async function getQuote(symbol: string): Promise<KLineData | null> {
   const data = await fetchJSON<{ symbol: string; quote: KLineData | null }>(`/api/quote/${symbol}`)
   return data.quote
+}
+
+/** 使用 v1 API 按时间范围 + 聚合周期获取 K线 */
+export async function getBarsV1(
+  symbol: string,
+  period: Period,
+  start: string,
+  end: string,
+  limit = 5000,
+): Promise<KLineData[]> {
+  const params = new URLSearchParams({
+    period,
+    start,
+    end,
+    limit: String(limit),
+    source: 'auto',
+  })
+  const data = await fetchJSON<{ symbol: string; bars: KLineData[]; count: number }>(
+    `/api/v1/bars/${symbol}?${params}`
+  )
+  return data.bars
 }

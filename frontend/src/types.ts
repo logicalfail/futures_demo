@@ -1,4 +1,18 @@
-/** K 线数据（分钟） */
+/** K线聚合周期 */
+export type Period = '1m' | '5m' | '15m' | '1h' | '1d'
+
+/** 时间范围预设 */
+export type TimeRangePreset = '1d' | '3d' | '7d' | '30d' | 'custom'
+
+/** 时间范围 */
+export interface TimeRange {
+  preset: TimeRangePreset
+  start: string      // ISO8601
+  end: string        // ISO8601
+  period: Period     // 自动选择的聚合周期
+}
+
+/** K 线数据 */
 export interface KLineData {
   ts_ns: number
   ts: string           // "2026-06-07 09:01:00"
@@ -7,9 +21,9 @@ export interface KLineData {
   low: number
   close: number
   volume: number
-  turnover: number
-  open_interest: number | null
-  source: string
+  turnover?: number
+  open_interest?: number | null
+  source?: string
 }
 
 /** 品种信息 */
