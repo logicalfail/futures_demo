@@ -107,7 +107,7 @@ class DataService:
             self.get_symbols()
         return self._symbols_cache
 
-    def get_kline(self, symbol: str, limit: int = 1000, days_back: int = 7) -> list[dict]:
+    def get_kline(self, symbol: str, limit: int = 1000, days_back: int = 20) -> list[dict]:
         """获取历史 K 线数据"""
         fsym = full_symbol(symbol)
         now_ns = time.time_ns()
@@ -247,7 +247,7 @@ class DataService:
         for sym in symbols:
             try:
                 code = sym.split(".")[0]
-                bars = fetch_minute_bars(code, lookback_days=3, force=True)
+                bars = fetch_minute_bars(code, lookback_days=20, force=True)
                 if bars:
                     n = self.storage.upsert_bars(bars)
                     total += n

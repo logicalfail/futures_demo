@@ -67,7 +67,7 @@ exchange_map:
 source:
   name: "akshare_sina"  # akshare底层用新浪接口
   freq: "1m"            # 分钟级
-  lookback_days: 5      # 回溯天数（新浪分钟线只保留最近5个交易日）
+  lookback_days: 20     # 回溯天数（持续运行累积数据，新接口默认20天）
 
 # 存储配置
 storage:

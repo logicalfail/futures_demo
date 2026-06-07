@@ -42,7 +42,7 @@
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `period` | string | `1m` | 聚合周期：`1m` / `5m` / `15m` / `1h` / `1d` |
-| `start` | string | 7天前 | 起始时间，ISO8601 格式：`2026-06-01` 或 `2026-06-01T09:00:00` |
+| `start` | string | 20天前 | 起始时间，ISO8601 格式：`2026-06-01` 或 `2026-06-01T09:00:00` |
 | `end` | string | 当前 | 结束时间，ISO8601 格式 |
 | `limit` | int | 500 | 返回条数上限（1–10000） |
 | `source` | string | `auto` | 数据源：`auto`（DB优先→AKShare补）、`db`（仅DB）、`live`（直拉AKShare） |
@@ -111,7 +111,7 @@
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `start` | string | 7天前 | 起始时间，ISO8601 格式 |
+| `start` | string | 20天前 | 起始时间，ISO8601 格式 |
 | `end` | string | 当前 | 结束时间，ISO8601 格式 |
 | `limit` | int | 500 | 返回条数上限（1–10000） |
 | `rollover` | string | `chain` | 换月处理模式：`chain` / `adjust` / `none` |
@@ -296,14 +296,14 @@ rollover=none:
 
 返回品种列表（同 `/api/v1/symbols`）。
 
-### `GET /api/kline/{symbol}?limit=1000&days_back=7`
+### `GET /api/kline/{symbol}?limit=1000&days_back=20`
 
 获取历史 K线（仅 1m，无聚合）。
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `limit` | int | 1000 | 最大条数（1–10000） |
-| `days_back` | int | 7 | 回溯天数（1–90） |
+| `days_back` | int | 20 | 回溯天数（1–90） |
 
 ### `GET /api/quote/{symbol}`
 

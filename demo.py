@@ -81,7 +81,7 @@ def run_demo(symbols: list[str]):
         sys.stdout.flush()
 
         try:
-            bars = fetch_minute_bars(sym, lookback_days=3)
+            bars = fetch_minute_bars(sym, lookback_days=20)
         except Exception as e:
             print(f"[FAIL] {e}")
             continue

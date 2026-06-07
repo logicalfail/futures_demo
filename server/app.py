@@ -104,7 +104,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     async def api_kline(
         symbol: str,
         limit: int = Query(1000, ge=1, le=10000),
-        days_back: int = Query(7, ge=1, le=90),
+        days_back: int = Query(20, ge=1, le=90),
     ):
         """获取历史K线数据"""
         bars = ds.get_kline(symbol, limit, days_back)

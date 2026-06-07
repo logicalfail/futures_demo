@@ -50,7 +50,7 @@ async def get_bars(
     """
     # 解析时间范围
     now = datetime.now()
-    start_dt = _parse_dt(start, now - timedelta(days=7))
+    start_dt = _parse_dt(start, now - timedelta(days=20))
     end_dt = _parse_dt(end, now)
 
     # 如果 start > end，交换
@@ -183,7 +183,7 @@ async def get_dominant_bars(
     - start/end: ISO8601 时间范围
     """
     now = datetime.now()
-    start_dt = _parse_dt(start, now - timedelta(days=7))
+    start_dt = _parse_dt(start, now - timedelta(days=20))
     end_dt = _parse_dt(end, now)
     if start_dt > end_dt:
         start_dt, end_dt = end_dt, start_dt

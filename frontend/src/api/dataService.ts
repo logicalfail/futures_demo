@@ -21,7 +21,7 @@ export async function getSymbols(): Promise<SymbolInfo[]> {
   return data.symbols
 }
 
-export async function getKLine(symbol: string, limit = 500, daysBack = 7): Promise<KLineData[]> {
+export async function getKLine(symbol: string, limit = 500, daysBack = 20): Promise<KLineData[]> {
   const data = await fetchJSON<{ symbol: string; bars: KLineData[] }>(
     `/api/kline/${symbol}?limit=${limit}&days_back=${daysBack}`
   )
