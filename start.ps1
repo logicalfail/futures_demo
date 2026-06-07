@@ -3,27 +3,47 @@
   期货行情终端 — 一键启动脚本
 .DESCRIPTION
   启动 FastAPI 后端（同时提供 REST API / WebSocket / 前端静态文件）
-  支持 dev / prod 两种模式
+  端口和地址从 server_config.yaml 读取
 .PARAMETER Mode
   prod  - 生产模式（默认，使用已构建的前端文件）
   dev   - 开发模式，前台启动 uvicorn（带 hot-reload）
   devbg - 开发模式，后台启动
+.PARAMETER PortOverride
+  覆盖 server_config.yaml 中的端口
+.PARAMETER HostOverride
+  覆盖 server_config.yaml 中的地址
 .EXAMPLE
-  .\start.ps1 prod       # 生产模式
-  .\start.ps1 dev        # 开发模式（前台，hot-reload）
-  .\start.ps1 devbg      # 开发模式（后台进程）
+  .\start.ps1 prod              # 生产模式，默认端口
+  .\start.ps1 dev               # 开发模式（前台，hot-reload）
+  .\start.ps1 prod -PortOverride 9000   # 覆盖端口
 #>
 
 param(
   [ValidateSet('prod', 'dev', 'devbg')]
-  [string]$Mode = 'prod'
+  [string]$Mode = 'prod',
+  [int]$PortOverride = 0,
+  [string]$HostOverride = ''
 )
 
 $RootDir = Split-Path -Parent $PSCommandPath
 $env:PYTHONPATH = $RootDir
 
+# ── 从 server_config.yaml 读取端口和地址 ──────────────────
+$ConfigFile = Join-Path $RootDir 'server_config.yaml'
 $HostAddr = '127.0.0.1'
 $Port = 8000
+
+if (Test-Path $ConfigFile) {
+  $configText = Get-Content $ConfigFile -Raw
+  $portMatch = [regex]::Match($configText, '(?m)^\s+port:\s*(\d+)')
+  $hostMatch = [regex]::Match($configText, '(?m)^\s+host:\s*"([^"]+)"')
+  if ($portMatch.Success) { $Port = [int]$portMatch.Groups[1].Value }
+  if ($hostMatch.Success) { $HostAddr = $hostMatch.Groups[1].Value }
+}
+
+# 命令行覆盖
+if ($PortOverride -gt 0) { $Port = $PortOverride }
+if ($HostOverride -ne '') { $HostAddr = $HostOverride }
 
 # ANSI 颜色
 $Green  = [char]0x1b + '[32m'
@@ -66,6 +86,7 @@ switch ($Mode) {
     Ensure-Frontend
     Write-Host "${Green}[+] 生产模式 — 启动 FastAPI 服务 ${Reset}"
     Write-Host "    ${Cyan}http://${HostAddr}:${Port}${Reset}"
+    Write-Host "    配置: ${Cyan}${ConfigFile}${Reset}"
     Write-Host "    ${Yellow}按 Ctrl+C 停止${Reset}`n"
     python -m uvicorn server.app:create_app --host $HostAddr --port $Port --factory --log-level info
   }
@@ -74,6 +95,7 @@ switch ($Mode) {
     Write-Host "${Yellow}[+] 开发模式 — 启动 FastAPI (hot-reload)${Reset}"
     Write-Host "    前端开发服:  ${Cyan}cd frontend && npm run dev${Reset}"
     Write-Host "    API 服     : ${Cyan}http://${HostAddr}:${Port}${Reset}"
+    Write-Host "    配置: ${Cyan}${ConfigFile}${Reset}"
     Write-Host "    ${Yellow}按 Ctrl+C 停止${Reset}`n"
     python -m uvicorn server.app:create_app --host $HostAddr --port $Port --factory --reload --log-level debug
   }
@@ -97,6 +119,7 @@ switch ($Mode) {
     } -ArgumentList $RootDir, $HostAddr, $Port
 
     Write-Host "    服务已后台启动  ${Cyan}http://${HostAddr}:${Port}${Reset}"
+    Write-Host "    配置: ${Cyan}${ConfigFile}${Reset}"
     Write-Host "    日志: ${Yellow}(Get-Job -Name '$jobName' | Receive-Job)${Reset}"
     Write-Host "    停止: ${Yellow}Get-Job -Name '$jobName' | Stop-Job | Remove-Job${Reset}`n"
   }
