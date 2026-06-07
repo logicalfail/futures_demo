@@ -21,7 +21,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from futures_demo.fetcher import fetch_minute_bars, parse_symbol, get_exchange
+from futures_demo.fetcher import fetch_minute_bars, parse_symbol, get_exchange, is_trading_time as _is_trading_time
 from futures_demo.storage import create_storage, StorageBackend
 from futures_demo.models import MarketBar, Exchange
 from futures_demo.config import load_config as load_data_config
@@ -32,25 +32,10 @@ from server.config import AppConfig
 
 
 # ── 在非交易时间跳过 ──────────────────────────────────────────
-TRADING_SESSIONS = [
-    (9, 0, 10, 15),
-    (10, 30, 11, 30),
-    (13, 30, 15, 0),
-    (21, 0, 23, 30),
-]
-
-
+# is_trading_time() 由 futures_demo.fetcher 统一管理
 def is_trading_time() -> bool:
-    """检查当前是否在交易时段内"""
-    now = datetime.now()
-    h, m = now.hour, now.minute
-    for sh, sm, eh, em in TRADING_SESSIONS:
-        start_min = sh * 60 + sm
-        end_min = eh * 60 + em
-        cur_min = h * 60 + m
-        if start_min <= cur_min < end_min:
-            return True
-    return False
+    """检查当前是否在交易时段内（委托至 fetcher 的统一实现）"""
+    return _is_trading_time()
 
 
 def full_symbol(symbol: str) -> str:
@@ -203,11 +188,16 @@ class DataService:
         """
         轮询所有品种的最新数据
         - 仅在交易时段工作（可配置）
+        - trading_hours_only=False 时绕过交易时段检查（手动刷新用）
         - 返回 {symbol: [new_bars_dict]}
         """
         if trading_hours_only and not is_trading_time():
             logger.debug("Outside trading hours, skipping poll")
             return {}
+
+        # 如果 caller 明确说 trading_hours_only=False（手动刷新），
+        # 传递给 fetcher 的 force=True 以绕过底层时间检查
+        force_fetch = not trading_hours_only
 
         symbols = self.get_symbol_codes()
         logger.info(f"Polling {len(symbols)} symbols...")
@@ -223,7 +213,7 @@ class DataService:
                 latest_ts = self.storage.get_latest_ts(sym)
 
                 # 拉取最近1天数据
-                bars = fetch_minute_bars(code, lookback_days=1)
+                bars = fetch_minute_bars(code, lookback_days=1, force=force_fetch)
 
                 if not bars:
                     continue
@@ -250,14 +240,14 @@ class DataService:
         return results
 
     def refresh_all(self) -> int:
-        """强制刷新所有品种，返回拉取总条数"""
+        """强制刷新所有品种，返回拉取总条数（跳过交易时段检查）"""
         symbols = self.get_symbol_codes()
         total = 0
 
         for sym in symbols:
             try:
                 code = sym.split(".")[0]
-                bars = fetch_minute_bars(code, lookback_days=3)
+                bars = fetch_minute_bars(code, lookback_days=3, force=True)
                 if bars:
                     n = self.storage.upsert_bars(bars)
                     total += n

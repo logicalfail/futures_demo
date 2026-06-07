@@ -28,10 +28,11 @@ class StorageConfig:
     path: str
 
     def __post_init__(self):
-        """将相对路径转为绝对路径（基于配置文件所在目录）"""
+        """将相对路径转为绝对路径（基于项目根目录）"""
         if not Path(self.path).is_absolute():
-            cfg_dir = Path(__file__).parent
-            self.path = (cfg_dir / self.path).resolve()
+            # 相对于项目根目录（config.yaml 所在目录的父目录）
+            project_root = Path(__file__).parent.parent
+            self.path = (project_root / self.path).resolve()
 
 
 @dataclass

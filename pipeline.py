@@ -32,6 +32,7 @@ from futures_demo.models import MarketBar
 def run_fetch() -> int:
     """
     单次采集全流程：fetch → normalize → upsert
+    跳过交易时段检查 — CLI 命令可随时运行
     返回写入的 K线 数量
     """
     cfg = get_config()
@@ -39,7 +40,7 @@ def run_fetch() -> int:
     total = 0
 
     try:
-        for bar in fetch_all_symbols(cfg.symbols.symbols, cfg.source.lookback_days):
+        for bar in fetch_all_symbols(cfg.symbols.symbols, cfg.source.lookback_days, force=True):
             try:
                 n = storage.upsert_bars([bar])
                 if n > 0:

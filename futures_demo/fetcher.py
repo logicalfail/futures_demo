@@ -19,6 +19,30 @@ from .models import MarketBar, Exchange, DataSource, get_multiplier
 from .config import load_config
 
 
+# 中国期货交易时段（最宽覆盖 — 贵金属夜盘至02:30）
+# 精确到品种的分组见 docs/KNOWLEDGE.md
+TRADING_SESSIONS = [
+    (9, 0, 10, 15),     # 日盘第一节
+    (10, 30, 11, 30),   # 日盘第二节
+    (13, 30, 15, 0),    # 日盘第三节
+    (21, 0, 23, 30),    # 夜盘（21:00-23:00 覆盖多数品种）
+    (23, 30, 2, 31),    # 夜盘续（23:30-02:30 覆盖AU/AG等）
+]
+
+
+def is_trading_time() -> bool:
+    """检查当前是否在交易时段内（北京时间）"""
+    now = datetime.now()
+    h, m = now.hour, now.minute
+    cur_min = h * 60 + m
+    for sh, sm, eh, em in TRADING_SESSIONS:
+        start_min = sh * 60 + sm
+        end_min = eh * 60 + em
+        if start_min <= cur_min < end_min:
+            return True
+    return False
+
+
 # 品种代码 -> 交易所映射（配置文件里也有，这里做兜底）
 SYMBOL_EXCHANGE_MAP = {
     # SHFE
@@ -59,13 +83,19 @@ def get_exchange(variety: str) -> Exchange:
     return Exchange(SYMBOL_EXCHANGE_MAP.get(variety, "SHFE"))
 
 
-def fetch_minute_bars(symbol: str, lookback_days: int = 5) -> list[MarketBar]:
+def fetch_minute_bars(symbol: str, lookback_days: int = 5, force: bool = False) -> list[MarketBar]:
     """
     获取单个品种的分钟K线
     - 使用 akshare.futures_zh_minute_sina
     - symbol 格式：RB2410, IF2008, AU2412（直接合约代码）
+    - force=True 时跳过交易时段检查（用于手动刷新/数据修复）
     - 返回标准化 MarketBar 列表
     """
+    # 交易时段检查（force=True 可绕过）
+    if not force and not is_trading_time():
+        logger.warning(f"Skipped {symbol}: outside trading hours")
+        return []
+
     variety, contract = parse_symbol(symbol)
     exchange = get_exchange(variety)
 
@@ -108,7 +138,9 @@ def fetch_minute_bars(symbol: str, lookback_days: int = 5) -> list[MarketBar]:
     for _, row in df.iterrows():
         try:
             dt = row["dt"]
-            ts_ns = int(dt.timestamp() * 1e9)
+            # ⚠️ pd.Timestamp.timestamp() 把 naive datetime 当 UTC 处理（Python bug/特性差异）
+            # 必须先转 Python datetime 再取 timestamp（Python 正确识别为 local time）
+            ts_ns = int(dt.to_pydatetime().timestamp() * 1e9)
 
             has_hold = "hold" in df.columns and pd.notna(row.get("hold"))
 
@@ -137,10 +169,10 @@ def fetch_minute_bars(symbol: str, lookback_days: int = 5) -> list[MarketBar]:
     return bars
 
 
-def fetch_all_symbols(symbols: list[str], lookback_days: int = 5) -> Generator[MarketBar, None, None]:
+def fetch_all_symbols(symbols: list[str], lookback_days: int = 5, force: bool = False) -> Generator[MarketBar, None, None]:
     """批量获取所有品种，生成器模式节省内存"""
     for sym in symbols:
-        bars = fetch_minute_bars(sym, lookback_days)
+        bars = fetch_minute_bars(sym, lookback_days, force=force)
         for bar in bars:
             yield bar
         # 礼貌性延迟，避免触发新浪频控
@@ -195,7 +227,8 @@ def fetch_minute_bars_em(symbol: str, lookback_days: int = 5) -> list[MarketBar]
     for _, row in df_clean.iterrows():
         try:
             dt = row["dt"]
-            ts_ns = int(dt.timestamp() * 1e9)
+            # 同上：pd.Timestamp.timestamp() 表现不同，先用 pydatetime
+            ts_ns = int(dt.to_pydatetime().timestamp() * 1e9)
             bar = MarketBar(
                 symbol=f"{symbol}.{exchange.value}",
                 exchange=exchange,
