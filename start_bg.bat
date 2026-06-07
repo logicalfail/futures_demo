@@ -69,7 +69,7 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr /c":%PORT% "') do (
     echo [OK] Server started successfully (PID %%a)
     echo.
     echo   Open: http://%HOST%:%PORT%
-    echo   Log:  %%ROOT_DIR%\server.log
+    echo   Log:  %ROOT_DIR%\server.log
     echo   Stop: taskkill /PID %%a
     echo.
     REM Open browser
