@@ -21,11 +21,11 @@ from typing import Optional
 
 from loguru import logger
 
-from .config import load_config, get_config
-from .fetcher import fetch_minute_bars, fetch_all_symbols
-from .storage import create_storage, StorageBackend
-from .quality import generate_report
-from .models import MarketBar
+from futures_demo.config import load_config, get_config
+from futures_demo.fetcher import fetch_minute_bars, fetch_all_symbols
+from futures_demo.storage import create_storage, StorageBackend
+from futures_demo.quality import generate_report
+from futures_demo.models import MarketBar
 
 
 # ============ 单次采集 ============

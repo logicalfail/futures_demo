@@ -1,0 +1,20 @@
+# server_config.yaml - FastAPI 服务配置
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  frontend_dir: "./frontend/dist"    # 前端构建后目录
+  reload: false
+  log_level: "INFO"
+
+scheduler:
+  enabled: true
+  interval_seconds: 60               # 轮询间隔（秒）
+  trading_hours_only: true           # 仅在交易时段轮询
+
+storage:
+  type: "sqlite"
+  path: "./data/futures_1m.db"
+  # 生产环境切换 TimescaleDB:
+  # type: "timescaledb"
+  # path: "postgresql://user:pass@localhost:5432/futures"
