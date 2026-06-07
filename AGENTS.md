@@ -47,6 +47,7 @@ C:\futures_demo\
 │   ├── connection_manager.py  # WebSocket connection pool
 │   ├── scheduler.py     #   Async minute-level polling scheduler
 │   ├── aggregation.py   #   1m → 5m/15m/1h/1d aggregation
+│   ├── dominant.py      #   Dominant contract resolution + rollover chaining
 │   └── routers/v1.py    #   /api/v1/* endpoints for strategy modules
 ├── frontend/            # React + Vite + ECharts SPA
 │   ├── src/api/         #   HTTP API wrappers
@@ -130,6 +131,8 @@ See `docs/KNOWLEDGE.md` for the full matrix.
 
 | Action | Command |
 |--------|---------|
+| Dominant contract bars | `GET /api/v1/dominant/{variety}?rollover=chain&limit=5` | 主力合约分钟K线，自动换月适配 |
+| Query bars (aggregated) | `GET /api/v1/bars/{symbol}?period=5m&limit=10` | 历史K线，支持多周期聚合 |
 | Start server (foreground) | `.\start.bat` or `.\start.bat 9000 0.0.0.0` (port, host) |
 | Start server (background, bat exits) | `.\start.bat --bg` (logs: `server.log`) |
 | Start server (background, auto-open browser) | `.\start_bg.bat` (kills old instance, opens http://...) |

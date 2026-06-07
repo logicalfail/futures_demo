@@ -8,7 +8,6 @@ API v1 — 交易策略模块数据接口
 """
 
 from __future__ import annotations
-import time
 from datetime import datetime, timedelta
 from typing import Literal, Optional
 
@@ -17,6 +16,7 @@ from loguru import logger
 
 from server.aggregation import aggregate_bars, Period
 from server.data_service import full_symbol
+from server.dominant import query_dominant_raw_bars
 from futures_demo.fetcher import fetch_minute_bars, get_exchange, parse_symbol
 
 router = APIRouter(prefix="/api/v1")
@@ -159,6 +159,48 @@ async def symbol_meta(code: str):
         "contract_month": contract,
         "multiplier": multiplier,
     }
+
+
+# ── GET /api/v1/dominant/{variety} ─────────────────────────────
+
+@router.get("/dominant/{variety}")
+async def get_dominant_bars(
+    variety: str,
+    start: Optional[str] = None,       # ISO8601
+    end: Optional[str] = None,         # ISO8601
+    limit: int = Query(500, ge=1, le=10000),
+    rollover: Literal["none", "chain", "adjust"] = "chain",
+    ds=Depends(_get_ds),
+):
+    """
+    获取品种主力合约的分钟K线数据（自动换月适配）。
+
+    - variety: 品种缩写，大小写不敏感，如 RB / au / V
+    - rollover: 换月处理模式
+        - chain (默认): 拼接历史+当前主力，标注换月点
+        - adjust: 拼接 + 后向比例复权
+        - none: 只返回当前主力合约数据
+    - start/end: ISO8601 时间范围
+    """
+    now = datetime.now()
+    start_dt = _parse_dt(start, now - timedelta(days=7))
+    end_dt = _parse_dt(end, now)
+    if start_dt > end_dt:
+        start_dt, end_dt = end_dt, start_dt
+
+    start_ns = int(start_dt.timestamp() * 1e9)
+    end_ns = int(end_dt.timestamp() * 1e9)
+
+    result = query_dominant_raw_bars(
+        variety=variety,
+        start_ns=start_ns,
+        end_ns=end_ns,
+        storage=ds.storage,
+        rollover_mode=rollover,
+        limit=limit,
+    )
+
+    return result
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────

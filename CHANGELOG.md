@@ -45,9 +45,26 @@
 - 品种总数从 13 个扩展到 24 个，按板块分组排序（贵金属、黑色系、能化、农产品）。
 - 更新 `config.yaml` 的 `exchange_map`，补充新品种的交易所映射。
 
+## 2026-06-08
+
+### 主力合约查询接口
+
+- **新增 `GET /api/v1/dominant/{variety}`**：输入品种缩写（大小写不敏感，如 `RB`/`au`/`V`），返回该品种当前主力合约的分钟K线数据。
+- **自动主力合约解析**：通过 AKShare `match_main_contract(exchange)` 实时查询当前主力合约代码，支持上期所、大商所、郑商所、中金所、广期所。
+- **换月适配**：提供三种模式：
+  - `chain`（默认）：拼接历史+当前主力，标注换月点
+  - `adjust`：拼接 + 后向比例复权（消除跳空）
+  - `none`：只返回当前主力合约
+- **历史主力推断**：基于品种固定换月周期（如螺纹钢 01→05→10、黄金 06→12），推算查询区间内的历史主力合约。
+- **防回摆机制**：换月点之后只接受当前主力合约数据，避免多合约时间重叠导致的反复切换。
+- **实时缓存**：从 AKShare 拉取的数据自动写入 SQLite，后续查询直接命中缓存。
+- 新增 `server/dominant.py` 模块（180行），封装主力合约解析、换月拼接、价格调整核心逻辑。
+
 ### 提交记录
 
 ```
+2787749 feat: expand symbol list to 24 varieties
+a22211d docs: add CHANGELOG.md recording development progress
 304ec51 chore: update data snapshot - refreshed futures 1m bar data
 075f3c9 fix: start_bg.bat - escape parens in echo, replace timeout with ping
 f908648 fix: start_bg.bat log path display - remove stray %% prefix
