@@ -44,15 +44,17 @@ ${Bold}${Cyan}╔═════════════════════
 }
 
 function Ensure-Frontend {
-  $dist = Join-Path $RootDir 'frontend' 'dist'
+  $dist = Join-Path (Join-Path $RootDir 'frontend') 'dist'
   $index = Join-Path $dist 'index.html'
   if (-not (Test-Path $index)) {
     Write-Host "${Yellow}[!] 前端尚未构建，正在构建...${Reset}"
     Push-Location (Join-Path $RootDir 'frontend')
-    npm install | Out-Null
+    if (-not (Test-Path 'node_modules')) {
+      npm install --no-fund --no-audit | Out-Null
+    }
     npm run build
     Pop-Location
-    Write-Host "${Green}[✓] 前端构建完成${Reset}"
+    Write-Host "${Green}[OK] 前端构建完成${Reset}"
   }
 }
 
