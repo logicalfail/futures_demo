@@ -81,7 +81,13 @@ class DataService:
     @property
     def storage(self) -> StorageBackend:
         if self._storage is None:
-            self._storage = create_storage()
+            from futures_demo.config import StorageConfig as DataStorageConfig
+            # 透传 server config 的 storage 路径到数据层
+            sc = DataStorageConfig(
+                type=self.app_config.storage.type,
+                path=self.app_config.storage.resolved_path,  # 已经是绝对路径
+            )
+            self._storage = create_storage(sc)
         return self._storage
 
     def get_symbols(self) -> list[dict]:
@@ -133,10 +139,12 @@ class DataService:
         fsym = full_symbol(symbol)
         try:
             now_ns = time.time_ns()
+            # 用一个宽泛的上界确保不遗漏数据（AKShare 时间戳可能略有偏移）
+            end_ns = now_ns + 86400 * int(1e9)  # now + 24h
             # 尝试多个时间窗口：1h → 2d → 7d
             for window_hours in [1, 48, 168]:
                 start_ns = now_ns - window_hours * 3600 * int(1e9)
-                bars = self.storage.query_bars(fsym, start_ns, now_ns, n)
+                bars = self.storage.query_bars(fsym, start_ns, end_ns, n)
                 if bars:
                     bars.sort(key=lambda x: x.ts_ns, reverse=True)
                     return [self._bar_to_dict(b) for b in bars[:n]]

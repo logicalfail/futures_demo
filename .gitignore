@@ -9,6 +9,12 @@ build/
 # Data
 data/*.db
 data/*.sqlite
+data/*.db-shm
+data/*.db-wal
+data/*.db-journal
+futures_demo/data/*.db
+futures_demo/data/*.db-shm
+futures_demo/data/*.db-wal
 
 # Env
 .env
@@ -22,6 +28,7 @@ venv/
 # Node
 node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 
 # OS
 Thumbs.db

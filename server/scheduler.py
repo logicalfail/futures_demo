@@ -78,13 +78,20 @@ class DataScheduler:
 
         logger.info("Scheduler loop ended")
 
+    async def _run_poll(self, trading_hours_only: bool) -> dict[str, list[dict]]:
+        """在 executor 中运行同步的 poll_new_data，不阻塞事件循环"""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._data.poll_new_data, trading_hours_only
+        )
+
     async def _tick(self):
         """一次调度 tick：轮询 → 推送到已订阅客户端"""
         logger.debug("Scheduler tick...")
         await self._ws.broadcast_status("polling", "Fetching new data...")
 
-        # 1. 轮询新数据
-        new_data = self._data.poll_new_data(trading_hours_only=self._trading_only)
+        # 1. 轮询新数据（在 executor 中运行，不阻塞事件循环）
+        new_data = await self._run_poll(trading_hours_only=self._trading_only)
 
         if not new_data:
             logger.debug("No new data")
@@ -109,7 +116,8 @@ class DataScheduler:
         await self._ws.broadcast_status("polling", "Manual refresh...")
 
         result = {}
-        new_data = self._data.poll_new_data(trading_hours_only=False)
+        # 在 executor 中运行，不阻塞事件循环
+        new_data = await self._run_poll(trading_hours_only=False)
 
         for symbol, bars in new_data.items():
             result[symbol] = len(bars)
