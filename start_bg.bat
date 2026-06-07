@@ -49,6 +49,7 @@ if not exist "%ROOT_DIR%\frontend\dist\index.html" (
 
 REM --- Kill existing process on this port ---
 echo [..] Checking for existing process on port %PORT%...
+set FOUND=
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr /c":%PORT% "') do (
     if not "%%a"=="0" (
         taskkill /PID %%a /f >nul 2>&1
@@ -56,9 +57,9 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr /c":%PORT% "') do (
     )
 )
 
-REM --- Start server in background ---
+REM --- Start server in background (detached from this console) ---
 echo [..] Starting server...
-start /B "" python -m uvicorn server.app:create_app --host %HOST% --port %PORT% --factory --log-level info > "%ROOT_DIR%\server.log" 2>&1
+powershell -Command "Start-Process -WindowStyle Hidden -FilePath python -ArgumentList '-m','uvicorn','server.app:create_app','--host','%HOST%','--port','%PORT%','--factory','--log-level','info' -RedirectStandardOutput '%ROOT_DIR%\server.log' -RedirectStandardError '%ROOT_DIR%\server.err'"
 
 REM --- Wait and verify ---
 echo [..] Waiting for server to come online...
