@@ -97,6 +97,94 @@
 
 ---
 
+### `GET /api/v1/dominant/{variety}` — 主力合约 K线（自动换月）
+
+获取品种当前主力合约的分钟 K线，自动处理合约换月拼接。
+
+#### 路径参数
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `variety` | string | 品种缩写，**大小写不敏感**，如 `RB` / `au` / `V` |
+
+#### 查询参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `start` | string | 7天前 | 起始时间，ISO8601 格式 |
+| `end` | string | 当前 | 结束时间，ISO8601 格式 |
+| `limit` | int | 500 | 返回条数上限（1–10000） |
+| `rollover` | string | `chain` | 换月处理模式：`chain` / `adjust` / `none` |
+
+#### rollover 模式说明
+
+| 模式 | 行为 |
+|------|------|
+| `chain`（默认） | 拼接历史主力 + 当前主力合约数据，在换月点做标记 |
+| `adjust` | 拼接 + **后向比例复权**，以当前主力为基准调整历史合约价格，消除跳空 |
+| `none` | 只返回当前主力合约数据，不查询历史合约 |
+
+#### 返回示例
+
+```json
+{
+  "variety": "RB",
+  "dominant_symbol": "RB2610.SHFE",
+  "rollovers": [
+    {
+      "from": "RB2609.SHFE",
+      "to": "RB2610.SHFE",
+      "ts_ns": 1780642800000000000,
+      "ts": "2026-06-05 15:00:00"
+    }
+  ],
+  "count": 120,
+  "bars": [
+    {
+      "ts": "2026-06-05 09:00:00",
+      "ts_ns": 1780606800000000000,
+      "open": 3150.0,
+      "high": 3155.0,
+      "low": 3148.0,
+      "close": 3153.0,
+      "volume": 1234,
+      "turnover": 0,
+      "open_interest": 1520000
+    }
+  ]
+}
+```
+
+#### 字段说明（响应顶层）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `variety` | string | 品种缩写（大写） |
+| `dominant_symbol` | string | 当前主力合约完整代码 |
+| `rollovers` | array | 换月事件列表，`chain`/`adjust` 模式返回 |
+| `rollovers[].from` | string | 换出合约 |
+| `rollovers[].to` | string | 换入合约 |
+| `rollovers[].ts_ns` | int64 | 换月时间戳 |
+| `count` | int | K线条数 |
+| `bars` | array | K线数据（同 `/api/v1/bars` 的 bar 结构） |
+
+#### 换月拼接示例
+
+假设当前主力是 RB2610，时间段内曾发生过 RB2609 → RB2610 换月：
+
+```
+rollover=chain:
+  RB2609 数据 ... ────→ RB2610 数据 ...    （拼接处标记换月点）
+
+rollover=adjust:
+  RB2609 数据(复权) ──→ RB2610 数据 ...   （历史价格按比率调整，消除跳空）
+
+rollover=none:
+  ───────────── RB2610 数据 ...            （只返回当前主力，忽略历史）
+```
+
+---
+
 ### `GET /api/v1/quotes/{symbol}` — 最新报价
 
 获取单个品种的最新报价（最后一条 K线的 close 价）。
@@ -236,7 +324,7 @@
 ```json
 {
   "status": "running",
-  "symbols_count": 13,
+  "symbols_count": 24,
   "last_poll_ts": 1780876800000000000,
   "last_update_ts": 1780876800000000000,
   "last_update_str": "08:00:00",
@@ -350,6 +438,19 @@ ws://<host>:<port>/ws
 ### curl
 
 ```bash
+# 主力合约分钟K线（自动换月拼接）
+curl "http://127.0.0.1:8000/api/v1/dominant/RB?limit=10"
+
+# 主力合约 + 后向复权（消除跳空缺口）
+curl "http://127.0.0.1:8000/api/v1/dominant/RB?rollover=adjust&limit=10"
+
+# 买入品种缩写大小写不敏感
+curl "http://127.0.0.1:8000/api/v1/dominant/au?limit=5"
+curl "http://127.0.0.1:8000/api/v1/dominant/v?limit=5"   # PVC
+
+# 主力合约 + 指定时间范围
+curl "http://127.0.0.1:8000/api/v1/dominant/RB?start=2026-06-03&end=2026-06-07"
+
 # 获取螺纹钢 5分钟 K线
 curl "http://127.0.0.1:8000/api/v1/bars/RB2609?period=5m&limit=10"
 
@@ -385,6 +486,11 @@ resp = urllib.request.urlopen(f"{base}/api/v1/bars/RB2609?period=5m&limit=10")
 data = json.loads(resp.read())
 print(f"Bars: {data['count']}")
 
+# 获取主力合约 K线（自动换月）
+resp = urllib.request.urlopen(f"{base}/api/v1/dominant/RB?rollover=chain&limit=10")
+data = json.loads(resp.read())
+print(f"Dominant: {data['dominant_symbol']}, bars: {data['count']}")
+
 # 使用 websockets 库连接 WebSocket
 import asyncio, websockets
 
@@ -405,6 +511,11 @@ const base = 'http://127.0.0.1:8000';
 const res = await fetch(`${base}/api/v1/bars/RB2609?period=5m&limit=10`);
 const data = await res.json();
 console.log(data);
+
+// 主力合约 K线
+const domRes = await fetch(`${base}/api/v1/dominant/RB?rollover=chain&limit=10`);
+const domData = await domRes.json();
+console.log(domData.dominant_symbol, domData.count);
 
 // WebSocket
 const ws = new WebSocket('ws://127.0.0.1:8000/ws');
