@@ -1,0 +1,18 @@
+# futures_demo 依赖（最小集）
+akshare>=1.14.0          # 数据获取（聚合新浪/东财/腾讯等源）
+pydantic>=2.0.0          # 数据建模与校验
+loguru>=0.7.0            # 日志
+pyyaml>=6.0              # 配置
+pandas>=1.5.0            # 数据处理（akshare依赖）
+
+# 可选：生产环境存储
+# psycopg2-binary>=2.9   # TimescaleDB 连接
+# sqlalchemy>=2.0         # ORM（如果需要）
+
+# 可选：vnpy 集成
+# vnpy>=3.9.0
+# vnpy_ctp>=6.7.2.1
+
+# 可选：可视化
+# matplotlib>=3.7.0
+# plotly>=5.15.0

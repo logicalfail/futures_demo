@@ -1,0 +1,73 @@
+# futures_demo/config.yaml
+# symbol格式：品种字母+交割年月，如 RB2609 = 螺纹钢 2026年9月合约
+# 当前日期 2026-06-07，使用当前活跃主力合约
+# 也可配置为 "auto" 自动匹配各交易所主力合约
+symbols:
+  - "AU2608"   # 黄金 2026年8月合约（SHFE）
+  - "AG2608"   # 白银 2026年8月合约（SHFE）
+  - "C2609"    # 玉米 2026年9月合约（DCE）
+  - "CF2609"   # 棉花 2026年9月合约（CZCE）
+  - "FG2609"   # 玻璃 2026年9月合约（CZCE）
+  - "I2609"    # 铁矿石 2026年9月合约（DCE）
+  - "MA2609"   # 甲醇 2026年9月合约（CZCE）
+  - "P2609"    # 棕榈油 2026年9月合约（DCE）
+  - "RB2609"   # 螺纹钢 2026年9月合约（SHFE）
+  - "RM2609"   # 菜粕 2026年9月合约（CZCE）
+  - "SA2609"   # 纯碱 2026年9月合约（CZCE）
+  - "SC2608"   # 原油 2026年8月合约（INE）
+  - "TA2609"   # PTA 2026年9月合约（CZCE）
+
+# 交易所映射（品种 -> 交易所）
+exchange_map:
+  RB: "SHFE"
+  I: "DCE"
+  JM: "DCE"
+  HC: "SHFE"
+  ZN: "SHFE"
+  CU: "SHFE"
+  AL: "SHFE"
+  AU: "SHFE"
+  AG: "SHFE"
+  BU: "SHFE"
+  FU: "SHFE"
+  SC: "INE"
+  NR: "SHFE"
+  SA: "CZCE"
+  CF: "CZCE"
+  FG: "CZCE"
+  MA: "CZCE"
+  RM: "CZCE"
+  TA: "CZCE"
+  P: "DCE"
+  C: "DCE"
+
+# 数据源配置
+source:
+  name: "akshare_sina"  # akshare底层用新浪接口
+  freq: "1m"            # 分钟级
+  lookback_days: 5      # 回溯天数（新浪分钟线只保留最近5个交易日）
+
+# 存储配置
+storage:
+  type: "sqlite"        # demo用sqlite，生产换TimescaleDB
+  path: "./data/futures_1m.db"
+  # TimescaleDB生产配置示例：
+  # type: "timescaledb"
+  # dsn: "postgresql://user:pass@localhost:5432/futures"
+
+# 调度配置
+scheduler:
+  interval_seconds: 60  # 分钟级轮询
+  trading_hours_only: true
+  # 中国期货交易时段
+  sessions:
+    - "09:00-10:15"
+    - "10:30-11:30"
+    - "13:30-15:00"
+    - "21:00-23:30"  # 夜盘
+
+# 质量检查阈值
+quality:
+  max_gap_seconds: 120      # 允许最大间隔2分钟
+  max_price_change_pct: 0.1 # 单根K线最大涨跌幅10%
+  min_volume: 0             # 最小成交量
