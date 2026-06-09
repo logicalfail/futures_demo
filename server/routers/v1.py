@@ -16,7 +16,7 @@ from loguru import logger
 
 from server.aggregation import aggregate_bars, Period
 from server.data_service import full_symbol
-from server.dominant import query_dominant_raw_bars
+from server.dominant import query_dominant_raw_bars, resolve_dominant_symbol, infer_dominant_contract
 from futures_demo.fetcher import fetch_minute_bars, get_exchange, parse_symbol
 
 router = APIRouter(prefix="/api/v1")
@@ -159,6 +159,96 @@ async def symbol_meta(code: str):
         "contract_month": contract,
         "multiplier": multiplier,
     }
+
+
+# ── GET /api/v1/dominant ────────────────────────────────────────
+
+@router.get("/dominant")
+async def list_dominant_symbols(ds=Depends(_get_ds)):
+    """
+    获取所有品种的当前主力合约列表。
+
+    优先通过 AKShare match_main_contract() 实时解析主力合约，
+    失败时回退到 config.yaml 中该品种的静态合约。
+    返回格式与 /api/symbols 兼容，前端可直接替换使用。
+    """
+    # 从 config 获取已有品种列表，提取唯一 variety
+    symbols_info = ds.get_symbols()
+    seen: set[str] = set()
+    varieties: list[str] = []
+    # 构建 variety → config 合约的 fallback 映射
+    fallback_map: dict[str, dict] = {}
+    for s in symbols_info:
+        v = s.get("variety", "")
+        if v and v not in seen:
+            seen.add(v)
+            varieties.append(v)
+            fallback_map[v] = s  # 保存第一个 config 合约作为 fallback
+
+    logger.info(f"[v1] Resolving dominant for {len(varieties)} varieties...")
+
+    result: list[dict] = []
+    akshare_count = 0
+    inferred_count = 0
+    config_count = 0
+
+    for variety in varieties:
+        # 1) 尝试 AKShare 实时查询
+        try:
+            dom = resolve_dominant_symbol(variety)
+        except Exception as e:
+            logger.warning(f"[v1] AKShare resolve failed for {variety}: {e}")
+            dom = None
+
+        if dom is not None:
+            code = dom.split(".")[0]
+            exchange = dom.split(".")[1] if "." in dom else ""
+            result.append({
+                "code": code,
+                "variety": variety,
+                "exchange": exchange,
+                "full_symbol": dom,
+                "display_name": f"{code} ({exchange})",
+                "contract_month": code[len(variety):] if code.startswith(variety) else "",
+            })
+            akshare_count += 1
+            continue
+
+        # 2) 时间推断 fallback
+        try:
+            dom = infer_dominant_contract(variety)
+        except Exception as e:
+            logger.warning(f"[v1] Time inference failed for {variety}: {e}")
+            dom = None
+
+        if dom is not None:
+            code = dom.split(".")[0]
+            exchange = dom.split(".")[1] if "." in dom else ""
+            result.append({
+                "code": code,
+                "variety": variety,
+                "exchange": exchange,
+                "full_symbol": dom,
+                "display_name": f"{code} ({exchange})",
+                "contract_month": code[len(variety):] if code.startswith(variety) else "",
+            })
+            inferred_count += 1
+            continue
+
+        # 3) config.yaml 静态合约兜底
+        fb = fallback_map.get(variety)
+        if fb:
+            logger.info(f"[v1] Dominant {variety} fallback to config: {fb['full_symbol']}")
+            result.append(fb)
+            config_count += 1
+        else:
+            logger.warning(f"[v1] No dominant or fallback for {variety}, skipping")
+
+    logger.info(
+        f"[v1] Dominant symbols: {akshare_count} AKShare, "
+        f"{inferred_count} inferred, {config_count} config, {len(result)} total"
+    )
+    return {"symbols": result}
 
 
 # ── GET /api/v1/dominant/{variety} ─────────────────────────────

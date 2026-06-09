@@ -23,6 +23,7 @@ from futures_demo.fetcher import (
     fetch_minute_bars,
     parse_symbol,
     SYMBOL_EXCHANGE_MAP,
+    SINA_MAX_LOOKBACK_DAYS,
 )
 from futures_demo.models import MarketBar
 from server.data_service import full_symbol
@@ -65,6 +66,100 @@ ROLL_CYCLE = {
 
 # 品种默认主力月份推断：如果不在 ROLL_CYCLE 中，使用所有12个月
 DEFAULT_ROLL_MONTHS = [1, 5, 9]
+
+# ── 完整活跃月份列表（用于时间推断 fallback） ─────────────────
+# 不同于 ROLL_CYCLE（只有主力月份的循环），这里是该品种所有活跃交易的月份。
+# 时间推断算法：取列表中第一个 ≥ (当前月份+2) 的月份，找到当前主力合约。
+TRADING_MONTHS: dict[str, list[int]] = {
+    # 贵金属 — SHFE 双月合约
+    "AU": [2, 4, 6, 8, 10, 12],
+    "AG": [2, 4, 6, 8, 10, 12],
+    # 黑色系
+    "RB": [1, 5, 10],
+    "HC": [1, 5, 10],
+    "I":  [1, 5, 9],
+    "J":  [1, 5, 9],
+    "JM": [1, 5, 9],
+    # 铁合金 — CZCE 全年逐月，但流动性集中在 1/5/9
+    "SF": [1, 5, 9],
+    "SM": [1, 5, 9],
+    # 能化
+    "SC": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],  # INE 逐月滚动
+    "V":  [1, 5, 9],
+    "PP": [1, 5, 9],
+    "L":  [1, 5, 9],
+    "MA": [1, 5, 9],
+    "TA": [1, 5, 9],
+    "FG": [1, 5, 9],
+    "SA": [1, 5, 9],
+    # 农产品
+    "C":  [1, 5, 9],
+    "CF": [1, 5, 9],
+    "P":  [1, 5, 9],
+    "RM": [1, 5, 9],
+}
+
+
+def infer_dominant_contract(variety: str, today=None) -> str | None:
+    """
+    基于时间推断当前主力合约代码。用于 AKShare 查不到时的 fallback。
+
+    算法：
+      取品种的 TRADING_MONTHS 列表，找到第一个 ≥ (当前月份 + 2) 的月份。
+      +2 缓冲确保已过换月窗口（通常交割月前 1-2 个月完成换月）。
+      若当年无满足条件的月份，取下一年的第一个活跃月份。
+
+    返回格式: "RB2610.SHFE"（含交易所后缀）
+
+    参考文档: docs/ROLLOVER_RULES.md
+    """
+    from datetime import datetime as dt
+    from futures_demo.fetcher import SYMBOL_EXCHANGE_MAP
+
+    variety = variety.strip().upper()
+    months = TRADING_MONTHS.get(variety)
+    if not months:
+        logger.warning(f"[infer] No trading months defined for {variety}")
+        return None
+
+    exchange_str = SYMBOL_EXCHANGE_MAP.get(variety)
+    if not exchange_str:
+        logger.warning(f"[infer] Unknown exchange for {variety}")
+        return None
+
+    if today is None:
+        today = dt.now()
+
+    current_month = today.month
+    current_year = today.year
+
+    # 目标月份 = 当前月份 + 2（换月缓冲）
+    target_month = current_month + 2
+
+    sorted_months = sorted(months)
+
+    target_year = current_year
+    found_month = None
+    for m in sorted_months:
+        if m >= target_month:
+            found_month = m
+            break
+
+    if found_month is None:
+        # 跨年：取下一年的第一个月份
+        found_month = sorted_months[0]
+        target_year = current_year + 1
+
+    # 构造合约代码: VARIETY + YY + MM
+    yy = str(target_year)[-2:]
+    mm = f"{found_month:02d}"
+    code = f"{variety}{yy}{mm}"
+
+    logger.info(
+        f"[infer] {variety}: current={current_year}-{current_month:02d}, "
+        f"target≥{target_year}-{target_month:02d} → {code}.{exchange_str}"
+    )
+    return f"{code}.{exchange_str}"
 
 
 def _get_variety_roll_months(variety: str) -> list[int]:
@@ -309,7 +404,7 @@ def query_dominant_raw_bars(
         code = sym.split(".")[0]
         logger.info(f"[dominant] Fetching live for {code}...")
         try:
-            live_bars = fetch_minute_bars(code, lookback_days=5, force=True)
+            live_bars = fetch_minute_bars(code, lookback_days=SINA_MAX_LOOKBACK_DAYS, force=True)
             if live_bars:
                 storage.upsert_bars(live_bars)
                 filtered = [b for b in live_bars if start_ns <= b.ts_ns <= end_ns]
