@@ -51,7 +51,7 @@
 
 ```json
 {
-  "symbol": "RB2609.SHFE",
+  "symbol": "RB2610.SHFE",
   "period": "5m",
   "start": "2026-06-05 09:00:00",
   "end": "2026-06-07 15:00:00",
@@ -182,6 +182,39 @@ rollover=adjust:
 rollover=none:
   ───────────── RB2610 数据 ...            （只返回当前主力，忽略历史）
 ```
+
+---
+
+### `GET /api/v1/dominant` — 全部主力合约列表
+
+获取所有品种的当前主力合约，三级 fallback 保证高可用。
+
+#### 三级解析策略
+
+| 优先级 | 策略 | 说明 |
+|--------|------|------|
+| 1 | AKShare `match_main_contract()` | 实时查询，最准确 |
+| 2 | 时间推断 `infer_dominant_contract()` | 基于换月规则推算（见 `docs/ROLLOVER_RULES.md`） |
+| 3 | config.yaml 静态合约 | 最终兜底 |
+
+#### 返回示例
+
+```json
+{
+  "symbols": [
+    {
+      "code": "RB2610",
+      "variety": "RB",
+      "exchange": "SHFE",
+      "full_symbol": "RB2610.SHFE",
+      "display_name": "RB2610 (SHFE)",
+      "contract_month": "2610"
+    }
+  ]
+}
+```
+
+> 返回格式与 `/api/symbols` 完全兼容，前端可直接替换使用。
 
 ---
 
@@ -419,16 +452,33 @@ ws://<host>:<port>/ws
 { "type": "pong" }
 ```
 
+#### ping（服务端 → 客户端）
+
+服务端每 30s 发送一次心跳，客户端无需响应：
+
+```json
+{ "type": "ping" }
+```
+
+#### error — 错误消息
+
+```json
+{ "type": "error", "message": "Unknown type: bad_msg" }
+```
+
+触发条件：JSON 解析失败、未知消息类型。
+
 ### 完整交互流程
 
 ```
-1. Client → Server:  {"type": "subscribe", "symbols": ["RB2609"]}
-2. Server → Client:  {"type": "kline_update", "symbol": "RB2609", "bars": [...]}
-3. ...每60秒调度器轮询...
-4. Server → Client:  {"type": "kline_update", "symbol": "RB2609", "bars": [新数据]}
-5. Client → Server:  {"type": "ping"}
-6. Server → Client:  {"type": "pong"}
-7. Client → Server:  {"type": "unsubscribe", "symbols": ["RB2609"]}
+1. Client → Server:  {"type": "subscribe", "symbols": ["RB2610"]}
+2. Server → Client:  {"type": "kline_update", "symbol": "RB2610", "bars": [...]}
+3. Server → Client:  {"type": "ping"}    (每30s)
+4. ...每60秒调度器轮询...
+5. Server → Client:  {"type": "kline_update", "symbol": "RB2610", "bars": [新数据]}
+6. Client → Server:  {"type": "ping"}
+7. Server → Client:  {"type": "pong"}
+8. Client → Server:  {"type": "unsubscribe", "symbols": ["RB2610"]}
 ```
 
 ---
@@ -438,6 +488,9 @@ ws://<host>:<port>/ws
 ### curl
 
 ```bash
+# 主力合约列表（所有品种）
+curl "http://127.0.0.1:8000/api/v1/dominant"
+
 # 主力合约分钟K线（自动换月拼接）
 curl "http://127.0.0.1:8000/api/v1/dominant/RB?limit=10"
 
@@ -452,26 +505,26 @@ curl "http://127.0.0.1:8000/api/v1/dominant/v?limit=5"   # PVC
 curl "http://127.0.0.1:8000/api/v1/dominant/RB?start=2026-06-03&end=2026-06-07"
 
 # 获取螺纹钢 5分钟 K线
-curl "http://127.0.0.1:8000/api/v1/bars/RB2609?period=5m&limit=10"
+curl "http://127.0.0.1:8000/api/v1/bars/RB2610?period=5m&limit=10"
 
 # 从AKShare直拉实时数据
 curl "http://127.0.0.1:8000/api/v1/bars/AU2608?source=live&period=1m&limit=5"
 
 # 查询指定时间范围
-curl "http://127.0.0.1:8000/api/v1/bars/RB2609?start=2026-06-05T09:00:00&end=2026-06-05T15:00:00"
+curl "http://127.0.0.1:8000/api/v1/bars/RB2610?start=2026-06-05T09:00:00&end=2026-06-05T15:00:00"
 
 # 批量报价
-curl "http://127.0.0.1:8000/api/v1/quotes?symbols=RB2609,AU2608,AG2608"
+curl "http://127.0.0.1:8000/api/v1/quotes?symbols=RB2610,AU2608,AG2608"
 
 # 品种列表
 curl "http://127.0.0.1:8000/api/v1/symbols"
 
 # 品种元信息
-curl "http://127.0.0.1:8000/api/v1/symbols/RB2609"
+curl "http://127.0.0.1:8000/api/v1/symbols/RB2610"
 
 # WebSocket (wscat 需安装: npm install -g wscat)
 wscat -c ws://127.0.0.1:8000/ws
-> {"type": "subscribe", "symbols": ["RB2609"]}
+> {"type": "subscribe", "symbols": ["RB2610"]}
 ```
 
 ### Python
@@ -481,8 +534,13 @@ import urllib.request, json
 
 base = "http://127.0.0.1:8000"
 
+# 获取所有主力合约
+resp = urllib.request.urlopen(f"{base}/api/v1/dominant")
+data = json.loads(resp.read())
+print(f"Dominant symbols: {len(data['symbols'])}")
+
 # 获取 K线
-resp = urllib.request.urlopen(f"{base}/api/v1/bars/RB2609?period=5m&limit=10")
+resp = urllib.request.urlopen(f"{base}/api/v1/bars/RB2610?period=5m&limit=10")
 data = json.loads(resp.read())
 print(f"Bars: {data['count']}")
 
@@ -496,7 +554,7 @@ import asyncio, websockets
 
 async def subscribe():
     async with websockets.connect("ws://127.0.0.1:8000/ws") as ws:
-        await ws.send(json.dumps({"type": "subscribe", "symbols": ["RB2609"]}))
+        await ws.send(json.dumps({"type": "subscribe", "symbols": ["RB2610"]}))
         msg = await ws.recv()
         print(msg)
 
@@ -508,18 +566,24 @@ asyncio.run(subscribe())
 ```javascript
 // fetch API
 const base = 'http://127.0.0.1:8000';
-const res = await fetch(`${base}/api/v1/bars/RB2609?period=5m&limit=10`);
+
+// 主力合约列表
+const domList = await fetch(`${base}/api/v1/dominant`).then(r => r.json());
+console.log(domList.symbols);
+
+// K线数据
+const res = await fetch(`${base}/api/v1/bars/RB2610?period=5m&limit=10`);
 const data = await res.json();
 console.log(data);
 
-// 主力合约 K线
+// 主力合约 K线（换月拼接）
 const domRes = await fetch(`${base}/api/v1/dominant/RB?rollover=chain&limit=10`);
 const domData = await domRes.json();
 console.log(domData.dominant_symbol, domData.count);
 
 // WebSocket
 const ws = new WebSocket('ws://127.0.0.1:8000/ws');
-ws.onopen = () => ws.send(JSON.stringify({type: 'subscribe', symbols: ['RB2609']}));
+ws.onopen = () => ws.send(JSON.stringify({type: 'subscribe', symbols: ['RB2610']}));
 ws.onmessage = (e) => console.log(JSON.parse(e.data));
 ```
 
