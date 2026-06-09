@@ -21,6 +21,12 @@ export async function getSymbols(): Promise<SymbolInfo[]> {
   return data.symbols
 }
 
+/** 获取所有品种的当前主力合约列表（实时解析） */
+export async function getDominantSymbols(): Promise<SymbolInfo[]> {
+  const data = await fetchJSON<{ symbols: SymbolInfo[] }>('/api/v1/dominant')
+  return data.symbols
+}
+
 export async function getKLine(symbol: string, limit = 500, daysBack = 20): Promise<KLineData[]> {
   const data = await fetchJSON<{ symbol: string; bars: KLineData[] }>(
     `/api/kline/${symbol}?limit=${limit}&days_back=${daysBack}`

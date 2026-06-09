@@ -12,7 +12,7 @@ import QuoteTable from './components/QuoteTable'
 import SymbolSelector from './components/SymbolSelector'
 import StatusBar from './components/StatusBar'
 import { useWebSocket } from './hooks/useWebSocket'
-import { getSymbols, getKLine, getStatus, getQuote, getBarsV1 } from './api/dataService'
+import { getSymbols, getDominantSymbols, getKLine, getStatus, getQuote, getBarsV1 } from './api/dataService'
 import type { SymbolInfo, KLineData, TimeRangePreset, Period } from './types'
 
 // ── 时间范围预设 ──
@@ -60,9 +60,9 @@ export default function App() {
   const [customEnd, setCustomEnd] = useState(isoNow())
   const [loading, setLoading] = useState(false)
 
-  // ---- 初始加载 ----
+  // ---- 初始加载：使用主力合约 ----
   useEffect(() => {
-    getSymbols().then(syms => {
+    getDominantSymbols().then(syms => {
       setSymbols(syms)
       if (syms.length > 0) {
         const first = syms[0].full_symbol
@@ -218,12 +218,18 @@ export default function App() {
       await resp.text()
       await loadAllQuotes()
       if (currentSymbol) {
-        await loadKLineByRange(currentSymbol, rangePreset, customStart, customEnd)
+        // 刷新后以最大窗口 (30d) 拉取数据，同步切换预设
+        setRangePreset('30d')
+        await loadKLineByRange(currentSymbol, '30d')
       }
+      // 同步刷新主力合约列表（可能已换月）
+      getDominantSymbols().then(syms => {
+        if (syms.length > 0) setSymbols(syms)
+      })
       await loadStatus()
     } catch { /* ignore */ }
     setTimeout(() => setRefreshing(false), 800)
-  }, [manualRefresh, currentSymbol, rangePreset, customStart, customEnd, loadKLineByRange])
+  }, [manualRefresh, currentSymbol, loadKLineByRange])
 
   // ---- 订阅 ----
   useEffect(() => {
