@@ -21,7 +21,10 @@ _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from futures_demo.fetcher import fetch_minute_bars, parse_symbol, get_exchange, is_trading_time as _is_trading_time
+from futures_demo.fetcher import (
+    fetch_minute_bars, parse_symbol, get_exchange, is_trading_time as _is_trading_time,
+    SINA_MAX_LOOKBACK_DAYS,
+)
 from futures_demo.storage import create_storage, StorageBackend
 from futures_demo.models import MarketBar, Exchange
 from futures_demo.config import load_config as load_data_config
@@ -189,6 +192,9 @@ class DataService:
         轮询所有品种的最新数据
         - 仅在交易时段工作（可配置）
         - trading_hours_only=False 时绕过交易时段检查（手动刷新用）
+        - 始终以 SINA_MAX_LOOKBACK_DAYS 窗口拉取，lib 层去重确保只存增量
+          （新品种 / 缺历史品种自动补全至最大窗口）
+        - 品种间间隔 0.3s 以避免 Sina 频控
         - 返回 {symbol: [new_bars_dict]}
         """
         if trading_hours_only and not is_trading_time():
@@ -204,7 +210,11 @@ class DataService:
 
         results: dict[str, list[dict]] = {}
 
-        for sym in symbols:
+        for i, sym in enumerate(symbols):
+            # ── 品种间间隔，避免 Sina 频控 ──
+            if i > 0:
+                time.sleep(0.3)
+
             try:
                 # 从 symbol 提取短代码
                 code = sym.split(".")[0]
@@ -212,25 +222,32 @@ class DataService:
                 # 获取数据库中该品种的最新时间戳
                 latest_ts = self.storage.get_latest_ts(sym)
 
-                # 拉取最近1天数据
-                bars = fetch_minute_bars(code, lookback_days=1, force=force_fetch)
+                # ── 始终以最大窗口拉取 ──
+                # 新浪接口固定返回约 5 个交易日数据，
+                # 全量写入 DB（upsert 按 (symbol, ts_ns) 主键自动去重），
+                # 同时填补之前轮询失败造成的缺口。
+                bars = fetch_minute_bars(
+                    code,
+                    lookback_days=SINA_MAX_LOOKBACK_DAYS,
+                    force=force_fetch,
+                )
 
                 if not bars:
                     continue
 
-                # 去重：只保留数据库中不存在的K线
-                new_bars: list[MarketBar] = []
-                for bar in bars:
-                    if latest_ts is None or bar.ts_ns > latest_ts:
-                        new_bars.append(bar)
+                # 全量写入（upsert 处理已有数据的更新、新数据的插入）
+                self.storage.upsert_bars(bars)
 
-                if not new_bars:
-                    continue
+                # 筛选本次新增的 bar 用于 WS 广播（避免推送全量历史）
+                new_bars = [b for b in bars if latest_ts is None or b.ts_ns > latest_ts]
+                if new_bars:
+                    results[sym] = [self._bar_to_dict(b) for b in new_bars]
 
-                # 写入存储
-                self.storage.upsert_bars(new_bars)
-                results[sym] = [self._bar_to_dict(b) for b in new_bars]
-                logger.debug(f"  {sym}: {len(new_bars)} new bars")
+                filled = len(bars) - len(new_bars)
+                logger.info(
+                    f"  {sym}: {len(bars)} fetched, "
+                    f"{len(new_bars)} new + {filled} gap-filled"
+                )
 
             except Exception as e:
                 logger.warning(f"Poll failed for {sym}: {e}")
