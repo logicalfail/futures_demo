@@ -10,7 +10,7 @@ sys.path.insert(0, "C:/futures_demo")
 os.chdir("C:/futures_demo")
 
 from loguru import logger
-from futures_demo.fetcher import fetch_minute_bars, SYMBOL_EXCHANGE_MAP
+from futures_demo.fetcher import fetch_minute_bars, parse_symbol, SYMBOL_EXCHANGE_MAP
 from futures_demo.config import load_config
 from futures_demo.storage import create_storage
 from futures_demo.models import MarketBar
@@ -49,7 +49,7 @@ total_skipped = 0
 errors = []
 
 for i, symbol in enumerate(SYMBOLS, 1):
-    variety, contract = symbol[:2], symbol[2:]
+    variety, contract = parse_symbol(symbol)
     exchange = SYMBOL_EXCHANGE_MAP.get(variety, "SHFE")
     full_sym = f"{symbol}.{exchange}"
     print(f"\n  [{i}/{len(SYMBOLS)}] {full_sym}...", end=" ", flush=True)

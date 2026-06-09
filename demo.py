@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from loguru import logger
 
 from futures_demo.config import load_config
-from futures_demo.fetcher import fetch_minute_bars
+from futures_demo.fetcher import fetch_minute_bars, SINA_MAX_LOOKBACK_DAYS
 from futures_demo.storage import create_storage
 from futures_demo.models import MarketBar, DataSource, Exchange
 from futures_demo.quality import generate_report
@@ -81,7 +81,7 @@ def run_demo(symbols: list[str]):
         sys.stdout.flush()
 
         try:
-            bars = fetch_minute_bars(sym, lookback_days=20)
+            bars = fetch_minute_bars(sym, lookback_days=SINA_MAX_LOOKBACK_DAYS)
         except Exception as e:
             print(f"[FAIL] {e}")
             continue

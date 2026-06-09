@@ -22,7 +22,7 @@ from typing import Optional
 from loguru import logger
 
 from futures_demo.config import load_config, get_config
-from futures_demo.fetcher import fetch_minute_bars, fetch_all_symbols
+from futures_demo.fetcher import fetch_minute_bars, fetch_all_symbols, SINA_MAX_LOOKBACK_DAYS
 from futures_demo.storage import create_storage, StorageBackend
 from futures_demo.quality import generate_report
 from futures_demo.models import MarketBar
@@ -57,8 +57,10 @@ def run_fetch() -> int:
 
 def run_fetch_incremental() -> int:
     """
-    增量采集：仅拉取最新数据（跳过已有时间戳）
-    适合循环调度
+    增量采集（同 server poll_new_data 策略）
+    - 始终以 SINA_MAX_LOOKBACK_DAYS 窗口拉取
+    - 去重过滤确保不重复写入
+    - 新品种 / 缺历史品种自动补全至最大窗口
     """
     cfg = get_config()
     storage = create_storage()
@@ -66,8 +68,15 @@ def run_fetch_incremental() -> int:
 
     try:
         for symbol in cfg.symbols.symbols:
-            latest_ts = storage.get_latest_ts(f"{symbol}.{get_exchange_from_symbol(symbol).value}")
-            bars = fetch_minute_bars(symbol, lookback_days=1)
+            full_sym = f"{symbol}.{get_exchange_from_symbol(symbol).value}"
+            latest_ts = storage.get_latest_ts(full_sym)
+
+            # 始终以最大窗口拉取，去重由 ts 过滤保证
+            bars = fetch_minute_bars(
+                symbol,
+                lookback_days=SINA_MAX_LOOKBACK_DAYS,
+                force=False,
+            )
 
             new_bars = []
             for bar in bars:
@@ -77,7 +86,7 @@ def run_fetch_incremental() -> int:
             if new_bars:
                 n = storage.upsert_bars(new_bars)
                 total += n
-                logger.info(f"  {symbol}: {len(new_bars)} new bars (latest was {latest_ts})")
+                logger.info(f"  {symbol}: {len(new_bars)} new bars")
             else:
                 logger.info(f"  {symbol}: no new data")
 

@@ -128,7 +128,7 @@ class DataScheduler:
         """
         # 动态导入避免循环依赖
         from futures_demo.config import get_config as get_data_config
-        from futures_demo.fetcher import parse_symbol, fetch_minute_bars
+        from futures_demo.fetcher import parse_symbol, fetch_minute_bars, SINA_MAX_LOOKBACK_DAYS
         from server.dominant import resolve_dominant_symbol
 
         cfg = get_data_config()
@@ -150,9 +150,9 @@ class DataScheduler:
             code = dom_symbol.split(".")[0]
             logger.info(f"[daily] {variety} -> dominant: {code}")
 
-            # 在 executor 中拉取分钟数据
+            # 在 executor 中拉取分钟数据（Sina 最多返回 SINA_MAX_LOOKBACK_DAYS 天）
             bars = await loop.run_in_executor(
-                None, lambda: fetch_minute_bars(code, lookback_days=20, force=True)
+                None, lambda: fetch_minute_bars(code, lookback_days=SINA_MAX_LOOKBACK_DAYS, force=True)
             )
 
             if bars:

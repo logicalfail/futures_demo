@@ -18,6 +18,9 @@ from loguru import logger
 from .models import MarketBar, Exchange, DataSource, get_multiplier
 from .config import load_config
 
+# ── 新浪接口约束 ──────────────────────────────────────────
+# AKShare 底层使用的新浪财经分钟线接口最多返回约 5 个交易日的数据
+SINA_MAX_LOOKBACK_DAYS = 5
 
 # 中国期货交易时段（最宽覆盖 — 贵金属夜盘至02:30）
 # 精确到品种的分组见 docs/KNOWLEDGE.md
@@ -51,7 +54,8 @@ SYMBOL_EXCHANGE_MAP = {
     "AU": "SHFE", "AG": "SHFE", "SS": "SHFE", "SP": "SHFE",
     # DCE
     "A": "DCE", "M": "DCE", "Y": "DCE", "P": "DCE", "C": "DCE", "CS": "DCE",
-    "J": "DCE", "JM": "DCE", "I": "DCE", "FB": "DCE", "BB": "DCE", "PP": "DCE",
+    "J": "DCE", "JM": "DCE", "I": "DCE", "L": "DCE", "FB": "DCE", "BB": "DCE",
+    "PP": "DCE",
     "V": "DCE", "EG": "DCE", "EB": "DCE", "PG": "DCE", "LH": "DCE",
     # CZCE
     "SR": "CZCE", "CF": "CZCE", "TA": "CZCE", "MA": "CZCE", "RM": "CZCE", "OI": "CZCE",
@@ -83,12 +87,13 @@ def get_exchange(variety: str) -> Exchange:
     return Exchange(SYMBOL_EXCHANGE_MAP.get(variety, "SHFE"))
 
 
-def fetch_minute_bars(symbol: str, lookback_days: int = 5, force: bool = False) -> list[MarketBar]:
+def fetch_minute_bars(symbol: str, lookback_days: int = SINA_MAX_LOOKBACK_DAYS, force: bool = False) -> list[MarketBar]:
     """
     获取单个品种的分钟K线
     - 使用 akshare.futures_zh_minute_sina
     - symbol 格式：RB2410, IF2008, AU2412（直接合约代码）
     - force=True 时跳过交易时段检查（用于手动刷新/数据修复）
+    - lookback_days 最大有效值为 SINA_MAX_LOOKBACK_DAYS（=5，新浪接口限制）
     - 返回标准化 MarketBar 列表
     """
     # 交易时段检查（force=True 可绕过）
@@ -169,7 +174,7 @@ def fetch_minute_bars(symbol: str, lookback_days: int = 5, force: bool = False) 
     return bars
 
 
-def fetch_all_symbols(symbols: list[str], lookback_days: int = 5, force: bool = False) -> Generator[MarketBar, None, None]:
+def fetch_all_symbols(symbols: list[str], lookback_days: int = SINA_MAX_LOOKBACK_DAYS, force: bool = False) -> Generator[MarketBar, None, None]:
     """批量获取所有品种，生成器模式节省内存"""
     for sym in symbols:
         bars = fetch_minute_bars(sym, lookback_days, force=force)
@@ -180,7 +185,7 @@ def fetch_all_symbols(symbols: list[str], lookback_days: int = 5, force: bool = 
 
 
 # ============ 备用数据源：东方财富（akshare封装） ============
-def fetch_minute_bars_em(symbol: str, lookback_days: int = 5) -> list[MarketBar]:
+def fetch_minute_bars_em(symbol: str, lookback_days: int = SINA_MAX_LOOKBACK_DAYS) -> list[MarketBar]:
     """
     备用源：东方财富分钟线
     ak.futures_zh_minute_em(symbol="RB2410", period="1")
